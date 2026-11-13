@@ -15,7 +15,7 @@ import time
 import logging
 import urllib3
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+TRUSTED_FORUM_HOST = 'nyt6y.bew2459m.com'
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -28,7 +28,7 @@ logger.addHandler(ch)
 
 def get_refresh_url(url: str):
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         if response.status_code != 403:
             response.raise_for_status()
 
@@ -49,7 +49,7 @@ def get_refresh_url(url: str):
         return None
 
 def get_url(url: str):
-    resp = requests.get(url)
+    resp = requests.get(url, timeout=30)
     soup = BeautifulSoup(resp.content, 'html.parser')
     
     links = soup.find_all('a', href=True)
@@ -62,6 +62,8 @@ class SouShuBaClient:
 
     def __init__(self, hostname: str, username: str, password: str, questionid: str = '0', answer: str = None,
                  proxies: dict | None = None):
+        if hostname != TRUSTED_FORUM_HOST:
+            raise ValueError('Forum address changed; verify the new destination before using credentials.')
         self.session: requests.Session = requests.Session()
         self.hostname = hostname
         self.username = username
@@ -79,7 +81,7 @@ class SouShuBaClient:
         self.proxies = proxies
 
     def login_form_hash(self):
-        rst = self.session.get(f'https://{self.hostname}/member.php?mod=logging&action=login', verify=False).text
+        rst = self.session.get(f'https://{self.hostname}/member.php?mod=logging&action=login', timeout=30, allow_redirects=False).text
         loginhash = re.search(r'<div id="main_messaqge_(.+?)">', rst).group(1)
         formhash = re.search(r'<input type="hidden" name="formhash" value="(.+?)" />', rst).group(1)
         return loginhash, formhash
@@ -103,15 +105,15 @@ class SouShuBaClient:
             'answer': self.answer
         }
 
-        resp = self.session.post(login_url, proxies=self.proxies, data=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
+        resp = self.session.post(login_url, proxies=self.proxies, data=payload, headers=headers, timeout=30, allow_redirects=False)
+        if resp.status_code == 200 and any(cookie.name.endswith('_auth') for cookie in self.session.cookies):
             logger.info(f'Welcome {self.username}!')
         else:
             raise ValueError('Verify Failed! Check your username and password!')
 
     def credit(self):
         credit_url = f"https://{self.hostname}/home.php?mod=spacecp&ac=credit&showcredit=1&inajax=1&ajaxtarget=extcreditmenu_menu"
-        credit_rst = self.session.get(credit_url, verify=False).text
+        credit_rst = self.session.get(credit_url, timeout=30, allow_redirects=False).text
 
         # 解析 XML，提取 CDATA
         root = ET.fromstring(str(credit_rst))
@@ -124,7 +126,7 @@ class SouShuBaClient:
         return hcredit_2
 
     def space_form_hash(self):
-        rst = self.session.get(f'https://{self.hostname}/home.php', verify=False).text
+        rst = self.session.get(f'https://{self.hostname}/home.php', timeout=30, allow_redirects=False).text
         formhash = re.search(r'<input type="hidden" name="formhash" value="(.+?)" />', rst).group(1)
         return formhash
 
@@ -136,6 +138,7 @@ class SouShuBaClient:
         headers["origin"] = f'https://{self.hostname}'
         headers["referer"] = f'https://{self.hostname}/home.php'
 
+        successful_posts = 0
         for x in range(5):
             payload = {
                 "message": "开心赚银币 {0} 次".format(x + 1).encode("GBK"),
@@ -144,12 +147,15 @@ class SouShuBaClient:
                 "referer": "home.php",
                 "formhash": formhash
             }
-            resp = self.session.post(space_url, proxies=self.proxies, data=payload, headers=headers, verify=False)
+            resp = self.session.post(space_url, proxies=self.proxies, data=payload, headers=headers, timeout=30, allow_redirects=False)
             if re.search("操作成功", resp.text):
                 logger.info(f'{self.username} post {x + 1}nd successfully!')
-                time.sleep(120)
+                successful_posts += 1
             else:
                 logger.warning(f'{self.username} post {x + 1}nd failed!')
+            if x < 4:
+                time.sleep(120)
+        return successful_posts
 
 
 if __name__ == '__main__':
@@ -163,9 +169,15 @@ if __name__ == '__main__':
                                 os.environ.get('SOUSHUBA_USERNAME', "USERNAME"),
                                 os.environ.get('SOUSHUBA_PASSWORD', "PASSWORD"))
         client.login()
-        client.space()
+        before_credit = client.credit()
+        logger.info(f'Starting balance: {before_credit} coins')
+        successful_posts = client.space()
         credit = client.credit()
-        logger.info(f'{client.username} have {credit} coins!')
+        logger.info(f'Ending balance: {credit} coins; posts successful: {successful_posts}/5')
+        if str(before_credit).strip().isdigit() and str(credit).strip().isdigit():
+            logger.info(f'Balance change: {int(credit) - int(before_credit):+d} coins')
+        if successful_posts != 5:
+            raise ValueError('Some posts failed; inspect the log before rerunning to avoid duplicate posts.')
     except Exception as e:
         logger.error(e)
         sys.exit(1)
