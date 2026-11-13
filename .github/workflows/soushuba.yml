@@ -1,6 +1,12 @@
 name: Run soushuba qiandao
 on:
   workflow_dispatch:
+    inputs:
+      completed_posts:
+        description: 'Already confirmed successful posts today (leave 0 for a new day)'
+        type: choice
+        default: '0'
+        options: ['0', '1', '2', '3', '4', '5']
   schedule:
     - cron: '17 21 * * *'
 
@@ -34,4 +40,5 @@ jobs:
           SOUSHUBA_HOSTNAME: ${{ secrets.SOUSHUBA_HOSTNAME }}
           SOUSHUBA_USERNAME: ${{ secrets.SOUSHUBA_USERNAME }}
           SOUSHUBA_PASSWORD: ${{ secrets.SOUSHUBA_PASSWORD }}
+          SOUSHUBA_POSTS_COMPLETED: ${{ inputs.completed_posts || '0' }}
         run: python soushuba.py
