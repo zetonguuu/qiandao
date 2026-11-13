@@ -1,0 +1,28 @@
+name: Keep scheduled tasks active
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 20 1,15 * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      - name: Record repository activity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Keep scheduled tasks active"
+          git push origin HEAD:master
