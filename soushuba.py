@@ -65,6 +65,10 @@ class SouShuBaClient:
         if hostname != TRUSTED_FORUM_HOST:
             raise ValueError('Forum address changed; verify the new destination before using credentials.')
         self.session: requests.Session = requests.Session()
+        # Only retry failures known to occur before any request is sent.
+        retry = urllib3.util.Retry(total=5, connect=5, read=0, status=0,
+                                  redirect=0, other=0, backoff_factor=3)
+        self.session.mount('https://', requests.adapters.HTTPAdapter(max_retries=retry))
         self.hostname = hostname
         self.username = username
         self.password = password
@@ -138,8 +142,12 @@ class SouShuBaClient:
         headers["origin"] = f'https://{self.hostname}'
         headers["referer"] = f'https://{self.hostname}/home.php'
 
-        successful_posts = 0
-        for x in range(5):
+        completed = int(os.environ.get('SOUSHUBA_POSTS_COMPLETED', '0') or '0')
+        if not 0 <= completed <= 5:
+            raise ValueError('Previously completed posts must be between 0 and 5.')
+        logger.info(f'Previously confirmed posts today: {completed}')
+        successful_posts = completed
+        for x in range(completed, 5):
             payload = {
                 "message": "开心赚银币 {0} 次".format(x + 1).encode("GBK"),
                 "addsubmit": "true",
